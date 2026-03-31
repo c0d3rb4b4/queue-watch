@@ -70,17 +70,44 @@ def get_trend(current, previous):
         return "→", Fore.YELLOW, 0
 
 
-def get_rate(history: deque) -> str:
-    """Return msgs/sec rate over the history window, or '-' if window not yet full."""
+def get_rate_value(history: deque):
+    """Return msgs/sec as a float, or None if fewer than 20 polls accumulated."""
     if len(history) < 20:
-        return "-"
+        return None
     oldest_count, oldest_ts = history[0]
     newest_count, newest_ts = history[-1]
     elapsed = (newest_ts - oldest_ts).total_seconds()
     if elapsed <= 0:
+        return None
+    return (newest_count - oldest_count) / elapsed
+
+
+def get_rate(history: deque) -> str:
+    """Return formatted msgs/sec string, or '-' if not yet available."""
+    rate = get_rate_value(history)
+    return "-" if rate is None else f"{rate:+.2f} msg/s"
+
+
+def get_eta(active: int, history: deque) -> str:
+    """Return estimated time to drain to zero based on current rate.
+
+    Only meaningful when the rate is negative (queue shrinking).
+    Returns '-' when rate is unavailable, '∞' when rate is zero or positive.
+    """
+    rate = get_rate_value(history)
+    if rate is None:
         return "-"
-    rate = (newest_count - oldest_count) / elapsed
-    return f"{rate:+.2f} msg/s"
+    if rate >= 0:
+        return "∞" if rate == 0 else "∞ (growing)"
+    seconds = active / abs(rate)
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    elif seconds < 3600:
+        return f"{seconds / 60:.1f}m"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}h {minutes:02d}m"
 
 
 # --- Main loop ---
@@ -194,6 +221,9 @@ Examples:
                 f"{rate_color}{rate_str}{Style.RESET_ALL}"
                 f"  [{poll_label}]"
             )
+            eta_str = get_eta(active, history)
+            eta_color = Fore.GREEN if not eta_str.startswith("∞") and eta_str != "-" else Fore.YELLOW
+            print(f"ETA to empty:    {eta_color}{eta_str}{Style.RESET_ALL}")
             interval_note = f"  (backing off ×{backoff:.1f})" if backoff > 1.0 else ""
             print(f"Poll interval:   {current_interval:.1f}s{interval_note}")
 
